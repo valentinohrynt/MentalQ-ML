@@ -4,23 +4,22 @@ import json
 from tensorflow.keras.models import load_model
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 import pickle
-import nltk
-from nltk.tokenize import word_tokenize
-import re
-import string
 import stanza
 from Sastrawi.StopWordRemover.StopWordRemoverFactory import StopWordRemoverFactory
 from gensim.models import Word2Vec
 import logging
 import warnings
 import os
+import re
+import string
+
 
 # Silence warnings
 logging.basicConfig(level=logging.WARNING)
 logging.getLogger('stanza').setLevel(logging.WARNING)
 warnings.filterwarnings("ignore", category=FutureWarning)
 
-# Inisialisasi
+# Inisialisasi Stanza untuk tokenisasi dan lemmatization
 nlp = stanza.Pipeline('id', processors='tokenize,lemma', use_gpu=False)
 
 # Load model yang sudah dilatih
@@ -63,14 +62,16 @@ def remove_stopwords(text):
     words = [word for word in words if word.lower() not in stop_words]
     return ' '.join(words)
 
-# Fungsi untuk lemmatization
-def lemmatize_text(text):
+# Fungsi untuk lemmatization dan tokenisasi menggunakan Stanza
+def lemmatize_and_tokenize_text(text):
     doc = nlp(text)
-    sentences = []
+    tokens = []  # Akan menyimpan token
+    lemmatized_text = []  # Akan menyimpan kata yang telah di-lemmatize
     for sentence in doc.sentences:
-        lemmas = [word.lemma for word in sentence.words]
-        sentences.append(' '.join(lemmas))
-    return ' '.join(sentences)
+        for word in sentence.words:
+            tokens.append(word.text)  # Token asli
+            lemmatized_text.append(word.lemma)  # Lemma dari kata tersebut
+    return lemmatized_text, tokens
 
 # Fungsi untuk mengonversi token menjadi sequence of integers
 def text_to_sequence(tokens, word_index):
@@ -87,11 +88,8 @@ def preprocess_input(text_raw):
     # Remove stopwords
     text_raw = remove_stopwords(text_raw)
     
-    # Lemmatize text
-    text_preprocessed = lemmatize_text(text_raw)
-    
-    # Tokenized text
-    tokenized_text = word_tokenize(text_preprocessed)
+    # Lemmatize and tokenize
+    lemmatized_text, tokenized_text = lemmatize_and_tokenize_text(text_raw)
     
     # Convert tokens to sequence of integers
     sequence = text_to_sequence(tokenized_text, word_index)
@@ -161,4 +159,3 @@ def predict():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 3000))
     app.run(host='0.0.0.0',port=port, debug=True)
-
