@@ -25,7 +25,7 @@ steps:
     args: [
       'run',
       'deploy',
-      'mentalq-backend',
+      'mentalq-model-api',
       '--image',
       'asia-southeast2-docker.pkg.dev/mentalq-cloud/mentalq-backend/model-api',
       '--region',
