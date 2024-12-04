@@ -10,6 +10,9 @@ COPY . .
 # Instal dependensi
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Download NLTK punkt
+RUN python -m nltk.downloader punkt
+
 # Ekspos port untuk aplikasi Flask
 EXPOSE 3000
 
