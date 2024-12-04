@@ -1,23 +1,27 @@
-# Gunakan image Python
+# Use a lightweight Python base image
 FROM python:3.9-slim
 
-# Set direktori kerja
+# Set environment variables to prevent Python from writing .pyc files and buffering output
+ENV PYTHONDONTWRITEBYTECODE 1
+ENV PYTHONUNBUFFERED 1
+
+# Set the working directory inside the container
 WORKDIR /app
 
-# Salin semua file ke dalam container
-COPY . .
+# Copy only requirements.txt first to leverage Docker's caching for dependency installation
+COPY requirements.txt .
 
-# Instal dependensi
+# Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Download NLTK punkt
-RUN python -m nltk.downloader punkt stopwords
+# Download NLTK punkt in a dedicated folder to ensure it's available
+RUN python -m nltk.downloader -d /usr/local/share/nltk_data punkt
 
-# Jika Anda menggunakan Stanza, pastikan untuk mendownload model bahasa Indonesia
-RUN python -c "import stanza; stanza.download('id')"
+# Copy the remaining application files
+COPY . .
 
-# Ekspos port untuk aplikasi Flask
+# Expose the Flask application port
 EXPOSE 3000
 
-# Perintah untuk menjalankan aplikasi
+# Define the entrypoint command for the Flask application
 CMD ["python", "apiflask.py"]
