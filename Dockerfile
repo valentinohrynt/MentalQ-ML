@@ -17,4 +17,4 @@ RUN python -c "import stanza; stanza.download('id')"
 EXPOSE 3000
 
 # Define the entrypoint command for the Flask application
-CMD ["python", "apiflask.py"]
+CMD ["python", "index.py"]
