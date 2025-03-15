@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify
 import numpy as np
 import json
+import tensorflow as tf
 from tensorflow.keras.models import load_model
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 import pickle
@@ -13,43 +14,58 @@ import os
 import re
 import string
 
-# Silence warnings
+# ============ GPU CONFIGURATION ============ #
+# Check and enable GPU for TensorFlow
+gpus = tf.config.experimental.list_physical_devices('GPU')
+if gpus:
+    try:
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, True)  # Prevents memory overflow
+        print("✅ GPU is available and configured")
+    except RuntimeError as e:
+        print(f"⚠️ GPU Error: {e}")
+
+# Enable XLA (Accelerated Linear Algebra) for optimization
+tf.config.optimizer.set_jit(True)
+
+# ============ LOGGING & WARNINGS ============ #
 logging.basicConfig(level=logging.WARNING)
 logging.getLogger('stanza').setLevel(logging.WARNING)
 warnings.filterwarnings("ignore", category=FutureWarning)
 
-# Inisialisasi Stanza untuk tokenisasi dan lemmatization
-nlp = stanza.Pipeline('id', processors='tokenize,lemma', use_gpu=False)
+# ============ STANZA INITIALIZATION ============ #
+# Load Stanza with GPU support
+nlp = stanza.Pipeline('id', processors='tokenize,lemma', use_gpu=True)
 
-# Load model yang sudah dilatih
+# ============ LOAD MODELS & ENCODERS ============ #
+# Load trained LSTM model
 model = load_model('model_save_ml/ml_model_lstm.h5')
 
 # Load Label Encoder
 with open('data/label_encoder.pkl', 'rb') as f:
     label_encoder = pickle.load(f)
 
-# Load Word2Vec model dan word_index
+# Load Word2Vec model
 word2vec_model = Word2Vec.load("model_word2vec/word2vec_model_MentalQ.model")
 word_index = {word: i + 1 for i, word in enumerate(word2vec_model.wv.index_to_key)}
 embedding_dim = 100
 max_sequence_length = 100
 
-# Fungsi untuk membersihkan teks
+# ============ TEXT PREPROCESSING FUNCTIONS ============ #
 def clean_text(text):
-    text = re.sub(r'[^\w\s]', '', text)
-    text = re.sub(r'\d+', '', text)
-    text = text.lower()
-    text = re.sub(r'\[.*?\]', '', text)
-    text = re.sub(r'https?://\S+|www\.\S+|\[.*?\]\(.*?\)', '', text)
-    text = re.sub(r'<.*?>+', '', text)
-    text = re.sub(r'@\w+', '', text)
-    text = re.sub(f'[{re.escape(string.punctuation)}]', '', text)
-    text = re.sub(r'\n', ' ', text)
-    text = re.sub(r'\w*\d\w*', '', text)
-    text = re.sub(r'\s+', ' ', text)
+    text = re.sub(r'[^\w\s]', '', text)  # Remove punctuation
+    text = re.sub(r'\d+', '', text)  # Remove numbers
+    text = text.lower()  # Convert to lowercase
+    text = re.sub(r'\[.*?\]', '', text)  # Remove text inside brackets
+    text = re.sub(r'https?://\S+|www\.\S+|\[.*?\]\(.*?\)', '', text)  # Remove URLs
+    text = re.sub(r'<.*?>+', '', text)  # Remove HTML tags
+    text = re.sub(r'@\w+', '', text)  # Remove mentions
+    text = re.sub(f'[{re.escape(string.punctuation)}]', '', text)  # Remove punctuation again
+    text = re.sub(r'\n', ' ', text)  # Remove new lines
+    text = re.sub(r'\w*\d\w*', '', text)  # Remove words with numbers
+    text = re.sub(r'\s+', ' ', text)  # Remove extra spaces
     return text
 
-# Fungsi untuk menghapus stopwords
 def remove_stopwords(text):
     factory = StopWordRemoverFactory()
     stop_words = set(factory.get_stop_words())
@@ -61,73 +77,46 @@ def remove_stopwords(text):
     words = [word for word in words if word.lower() not in stop_words]
     return ' '.join(words)
 
-# Fungsi untuk lemmatization dan tokenisasi menggunakan Stanza
 def lemmatize_and_tokenize_text(text):
     doc = nlp(text)
-    tokens = []  # Akan menyimpan token
-    lemmatized_text = []  # Akan menyimpan kata yang telah di-lemmatize
+    tokens = []
+    lemmatized_text = []
     for sentence in doc.sentences:
         for word in sentence.words:
-            tokens.append(word.text)  # Token asli
-            lemmatized_text.append(word.lemma)  # Lemma dari kata tersebut
+            tokens.append(word.text)  
+            lemmatized_text.append(word.lemma)  
     return lemmatized_text, tokens
 
-# Fungsi untuk mengonversi token menjadi sequence of integers
 def text_to_sequence(tokens, word_index):
     return [word_index[word] for word in tokens if word in word_index]
 
-# Fungsi untuk preprocessing teks
 def preprocess_input(text_raw):
-    # Cleaning text
     text_raw = clean_text(text_raw)
-    
-    # Convert to lowercase
     text_raw = text_raw.lower()
-    
-    # Remove stopwords
     text_raw = remove_stopwords(text_raw)
-    
-    # Lemmatize and tokenize
     lemmatized_text, tokenized_text = lemmatize_and_tokenize_text(text_raw)
-    
-    # Convert tokens to sequence of integers
     sequence = text_to_sequence(tokenized_text, word_index)
-    
-    # Padding sequence
     padded_sequence = pad_sequences([sequence], maxlen=max_sequence_length, padding='post')
-    
     return padded_sequence
 
-# Fungsi untuk melakukan prediksi dengan probabilitas
+# ============ PREDICTION FUNCTION ============ #
 def predict_status_with_probabilities(text_raw):
-    # Preprocess input text
     preprocessed_input = preprocess_input(text_raw)
-    
-    # Prediksi kelas dengan probabilitas
     predicted_class_probs = model.predict(preprocessed_input)
-    
-    # Mendapatkan kelas terprediksi dengan probabilitas tertinggi
     predicted_class_idx = np.argmax(predicted_class_probs, axis=1)
-    
-    # Mendapatkan probabilitas untuk kelas terprediksi
     predicted_class_prob = np.max(predicted_class_probs, axis=1)
-    
-    # Mengembalikan label kelas yang terprediksi dan probabilitas untuk setiap kelas
     predicted_label = label_encoder.inverse_transform(predicted_class_idx)
-    
     return predicted_label[0], predicted_class_probs[0]
 
-# Initialize Flask app
+# ============ FLASK API ============ #
 app = Flask(__name__)
 
 @app.route("/predict", methods=["POST"])
 def predict():
-    # Ensure request contains JSON
     if not request.is_json:
         return jsonify({"error": "Invalid input, expected JSON format"}), 400
     
     try:
-        # Get input data
         data = request.get_json()
         
         if 'statements' not in data:
@@ -155,6 +144,7 @@ def predict():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# ============ START SERVER ============ #
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 3000))
-    app.run(host='0.0.0.0',port=port, debug=True)
+    app.run(host='0.0.0.0', port=port, debug=True)
